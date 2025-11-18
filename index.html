@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sensor Demo Hub — Camera, Mic, Torch, PPG (Prototype)</title>
+<meta name="description" content="Browser demo for camera+flash, simple PPG heart-rate prototype, and microphone breathing visualization. Experimental; not medical."/>
+<style>
+  :root{
+    --bg:#0b1220; --card:#0f1724; --muted:#9fb7e6; --accent:#06d6a0; --accent-2:#ffd166;
+    --glass: rgba(255,255,255,0.03);
+    --radius:12px;
+    --maxWidth:1100px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%; margin:0; font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Arial; background:
+    linear-gradient(180deg,#071021,#04101a); color:#e6eef8; -webkit-font-smoothing:antialiased;}
+  .wrap{max-width:var(--maxWidth); margin:28px auto; padding:20px; border-radius:16px; background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent); box-shadow:0 12px 40px rgba(2,6,12,0.7);}
+  header{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  h1{margin:0;font-size:20px}
+  p.lead{margin:0;color:var(--muted)}
+  .grid{display:grid;grid-template-columns: 1fr 420px; gap:18px; margin-top:18px;}
+  @media (max-width:980px){ .grid{grid-template-columns:1fr} }
+
+  /* left column - interactive */
+  .card{background:var(--card); padding:14px; border-radius:var(--radius); box-shadow:0 6px 18px rgba(0,0,0,0.45)}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  button{background:transparent;border:1px solid rgba(255,255,255,0.06); padding:8px 12px;border-radius:10px;color:inherit;cursor:pointer}
+  button.primary{background:linear-gradient(90deg,var(--accent),var(--accent-2)); color:#06211f; border:none}
+  .status{font-size:13px;color:var(--muted)}
+  video{width:100%; border-radius:10px; display:block; background:#000}
+  canvas{width:100%; border-radius:8px; display:block; background:linear-gradient(180deg,#071422, #021018)}
+  .small{font-size:13px;color:var(--muted); margin-top:6px}
+
+  /* right column - table and info */
+  .table-wrap{overflow:auto; max-height:70vh; padding-right:8px}
+  table{border-collapse:collapse;width:100%; min-width:560px}
+  th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,0.03); text-align:left}
+  th{color:var(--muted); font-weight:600; font-size:13px}
+  td{font-size:14px}
+  .chip{display:inline-block;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,0.03); color:var(--muted); font-size:13px; margin-left:6px}
+
+  footer{margin-top:12px; font-size:13px; color:var(--muted)}
+  .disclaimer{margin-top:12px; font-size:13px; color:#ffd166}
+</style>
+</head>
+<body>
+<div class="wrap" role="main">
+  <header>
+    <div>
+      <h1>Sensor Demo Hub</h1>
+      <p class="lead">Camera, Torch (flash), Microphone demos — including an experimental camera PPG (heart-rate) prototype and breathing visualization. Works best on mobile rear camera. Not medical — for demonstration only.</p>
+    </div>
+    <div style="margin-left:auto; text-align:right">
+      <div class="status" id="featureStatus">Detecting features…</div>
+      <div class="small">Ready to deploy on GitHub Pages — just push `index.html` to repo root.</div>
+    </div>
+  </header>
+
+  <div class="grid" style="margin-top:18px;">
+
+    <!-- LEFT: Interactive demos -->
+    <div>
+      <div class="card" aria-live="polite">
+        <h3 style="margin:0 0 8px 0">Camera & Torch</h3>
+        <video id="video" autoplay playsinline></video>
+        <div class="controls">
+          <button id="openCameraBtn" class="primary">Open Camera</button>
+          <button id="switchCameraBtn">Switch Camera</button>
+          <button id="toggleTorchBtn">Toggle Torch</button>
+          <button id="takeSnapshotBtn">Snapshot</button>
+          <div style="flex:1"></div>
+          <div class="status" id="cameraStatus">Camera: unknown</div>
+        </div>
+        <div class="small">Notes: Torch control requires a device camera with torch support and a compatible browser (Chrome Android). Snapshot saves captured frame as an image (download).</div>
+      </div>
+
+      <div style="height:14px"></div>
+
+      <div class="card" id="ppgCard" aria-live="polite">
+        <h3 style="margin:0 0 8px 0">Experimental Heart Rate (PPG) — Camera</h3>
+        <canvas id="ppgChart" height="120"></canvas>
+        <div class="controls">
+          <button id="startPpgBtn">Start PPG</button>
+          <button id="stopPpgBtn">Stop</button>
+          <div style="flex:1"></div>
+          <div class="status">Estimated BPM: <span id="bpm">—</span></div>
+        </div>
+        <div class="small">Instructions: place your fingertip gently over the camera (rear camera recommended) and keep still. This is an experimental algorithm for demonstration — results vary widely by device, lighting, and finger pressure.</div>
+      </div>
+
+      <div style="height:14px"></div>
+
+      <div class="card" id="micCard" aria-live="polite">
+        <h3 style="margin:0 0 8px 0">Microphone — Breathing / Amplitude Visualizer</h3>
+        <canvas id="micCanvas" height="100"></canvas>
+        <div class="controls">
+          <button id="openMicBtn">Open Microphone</button>
+          <button id="closeMicBtn">Stop Mic</button>
+          <div style="flex:1"></div>
+          <div class="status" id="micStatus">Microphone: unknown</div>
+        </div>
+        <div class="small">Tip: breathe slowly near the mic — the amplitude peaks may indicate breaths. This is NOT a medical tool.</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Table and sensor summary -->
+    <div>
+      <div class="card table-wrap">
+        <h3 style="margin:0 0 8px 0">Sensor Table (from your screenshot)</h3>
+        <table>
+          <thead>
+            <tr><th>Scan Type</th><th>Sensor(s) Used</th><th>Example Use / App</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Heart Rate / Pulse</td><td>Camera + Flash</td><td>Cardiogram, Binah.ai, Apple Health <span class="chip">pmc.ncbi.nlm.nih.gov</span></td></tr>
+            <tr><td>Blood Pressure</td><td>Camera + Flash</td><td>Binah.ai, Shen AI, HemaApp</td></tr>
+            <tr><td>Blood Oxygen (SpO₂)</td><td>Camera + Flash</td><td>Pulse Oximeter Apps</td></tr>
+            <tr><td>Hemoglobin (Anemia)</td><td>Camera + Flash</td><td>HemaApp</td></tr>
+            <tr><td>Breathing Rate</td><td>Camera, Microphone</td><td>Binah.ai, wellness apps</td></tr>
+            <tr><td>Stress Level</td><td>Camera + Flash, Microphone</td><td>Binah.ai, Bio-Scan</td></tr>
+            <tr><td>Blood Group (Exp.)</td><td>Fingerprint (concept)</td><td>Experimental apps</td></tr>
+            <tr><td>Skin Disease Analysis</td><td>Camera</td><td>SkinVision, AI diagnostic apps</td></tr>
+            <tr><td>Body Temperature</td><td>Special thermal</td><td>Thermal health apps</td></tr>
+          </tbody>
+        </table>
+
+        <div style="height:12px"></div>
+        <div class="small"><strong>Sensor availability:</strong> modern browsers expose camera & microphone via <code>getUserMedia()</code>. Torch support and fingerprint access are device-specific. Advanced vital-sign estimations require specialized validated SDKs; use them for production/medical use.</div>
+      </div>
+
+      <div style="height:12px"></div>
+
+      <div class="card">
+        <h3 style="margin:0 0 8px 0">Quick Deploy</h3>
+        <ol style="margin:0 0 8px 18px; color:var(--muted)">
+          <li>Create a GitHub repo (e.g., <code>sensor-demo</code>).</li>
+          <li>Upload this <code>index.html</code> to repo root (or push with git).</li>
+          <li>Enable GitHub Pages (Settings → Pages → Branch: main → root).</li>
+          <li>Open the provided <code>*.github.io/...</code> URL. Camera requires HTTPS (GitHub Pages provides HTTPS).</li>
+        </ol>
+        <div class="disclaimer">⚠️ This demo is experimental and educational only — not for diagnosis. Please follow privacy rules and ask user permission before accessing sensors.</div>
+      </div>
+
+    </div>
+  </div>
+
+  <footer>
+    <div class="small">Created for prototyping. If you want this integrated with a backend, secure data storage, or an SDK (for better SpO₂ / BP estimation), tell me which provider — I can adapt.</div>
+  </footer>
+</div>
+
+<script>
+/* ============================
+   Feature detection & state
+   ============================ */
+const featureStatus = document.getElementById('featureStatus');
+const cameraStatus = document.getElementById('cameraStatus');
+const micStatus = document.getElementById('micStatus');
+
+let currentStream = null;
+let usingFacingMode = 'environment'; // prefer rear camera where available
+let torchOn = false;
+let videoTrack = null;
+
+/* Update feature availability text */
+async function detectFeatures(){
+  const hasGetUserMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const supportsWebAuthn = !!(window.PublicKeyCredential);
+  featureStatus.textContent = 'getUserMedia: ' + (hasGetUserMedia ? 'yes' : 'no') + ' — WebAuthn: ' + (supportsWebAuthn ? 'available' : 'not available');
+}
+detectFeatures();
+
+/* ============================
+   Camera & torch controls
+   ============================ */
+const videoEl = document.getElementById('video');
+const openCameraBtn = document.getElementById('openCameraBtn');
+const switchCameraBtn = document.getElementById('switchCameraBtn');
+const toggleTorchBtn = document.getElementById('toggleTorchBtn');
+const takeSnapshotBtn = document.getElementById('takeSnapshotBtn');
+
+openCameraBtn.addEventListener('click', openCamera);
+switchCameraBtn.addEventListener('click', switchCamera);
+toggleTorchBtn.addEventListener('click', toggleTorch);
+takeSnapshotBtn.addEventListener('click', takeSnapshot);
+
+async function openCamera(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    cameraStatus.textContent = 'Camera: not supported';
+    return;
+  }
+  stopStream();
+  try {
+    const constraints = {
+      audio: false,
+      video: {
+        facingMode: { ideal: usingFacingMode },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30 }
+      }
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    currentStream = stream;
+    videoEl.srcObject = stream;
+    videoTrack = stream.getVideoTracks()[0];
+    cameraStatus.textContent = `Camera: opened (${videoTrack.label || 'unknown'})`;
+    // check torch availability
+    const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+    if (capabilities.torch) {
+      toggleTorchBtn.disabled = false;
+      toggleTorchBtn.textContent = 'Toggle Torch';
+    } else {
+      toggleTorchBtn.disabled = true;
+      toggleTorchBtn.textContent = 'Torch not supported';
+    }
+  } catch (err) {
+    console.error('openCamera error', err);
+    cameraStatus.textContent = 'Camera: permission denied or unavailable';
+  }
+}
+
+async function switchCamera(){
+  usingFacingMode = (usingFacingMode === 'environment') ? 'user' : 'environment';
+  await openCamera();
+}
+
+async function toggleTorch(){
+  if (!videoTrack) return;
+  const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+  if (!capabilities.torch) {
+    alert('Torch not supported on this device/browser.');
+    return;
+  }
+  try {
+    torchOn = !torchOn;
+    await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+    toggleTorchBtn.textContent = torchOn ? 'Torch: ON' : 'Toggle Torch';
+  } catch (err) {
+    console.error('toggleTorch error', err);
+    alert('Unable to toggle torch: ' + err.message);
+  }
+}
+
+function takeSnapshot(){
+  if (!videoEl || !currentStream) return;
+  const w = videoEl.videoWidth, h = videoEl.videoHeight;
+  if (!w || !h) return alert('Video not ready yet.');
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(videoEl, 0, 0, w, h);
+  c.toBlob((blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'snapshot.png';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+}
+
+function stopStream(){
+  if (currentStream) {
+    currentStream.getTracks().forEach(t => t.stop());
+    currentStream = null;
+    videoTrack = null;
+    cameraStatus.textContent = 'Camera: stopped';
+  }
+}
+
+/* ============================
+   Simple PPG heart-rate (experimental)
+   ============================
+   Approach:
+   - Grab video frames from camera (prefer rear camera)
+   - Compute average red channel per frame -> time series
+   - Bandpass-ish smoothing + peak detection to estimate beats per minute (BPM)
+   NOTE: this is a naive algorithm for demo only.
+*/
+const startPpgBtn = document.getElementById('startPpgBtn');
+const stopPpgBtn = document.getElementById('stopPpgBtn');
+const ppgCanvas = document.getElementById('ppgChart');
+const ppgCtx = ppgCanvas.getContext('2d');
+const bpmEl = document.getElementById('bpm');
+
+let ppgRunning = false;
+let ppgInterval = null;
+let redBuffer = [];
+let timeBuffer = [];
+
+startPpgBtn.addEventListener('click', startPpg);
+stopPpgBtn.addEventListener('click', stopPpg);
+
+async function startPpg(){
+  if (!navigator.mediaDevices) { alert('getUserMedia not supported'); return; }
+  if (!currentStream) {
+    // try to open camera with rear facing mode
+    usingFacingMode = 'environment';
+    await openCamera();
+  }
+  if (!videoTrack) { alert('No video track'); return; }
+  ppgRunning = true;
+  redBuffer = []; timeBuffer = [];
+  bpmEl.textContent = '…';
+  // capture frames at ~30fps (browser decides)
+  ppgInterval = requestAnimationFrame(ppgLoop);
+}
+
+function stopPpg(){
+  ppgRunning = false;
+  if (ppgInterval) cancelAnimationFrame(ppgInterval);
+  bpmEl.textContent = '—';
+  drawPpg([]); // clear visualization
+}
+
+/* Utility: get average red intensity of current video frame */
+function sampleRedFromVideo(){
+  const w = Math.min(160, videoEl.videoWidth || 160);
+  const h = Math.min(120, videoEl.videoHeight || 120);
+  if (!w || !h) return null;
+  const c = ppgCanvas; // reuse canvas size for processing
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  try {
+    ctx.drawImage(videoEl, 0, 0, w, h);
+  } catch(e){
+    return null;
+  }
+  const data = ctx.getImageData(0,0,w,h).data;
+  let sum = 0, count = 0;
+  // sample every 4th pixel for speed
+  for (let i=0;i<data.length;i+=16){
+    sum += data[i]; // red channel
+    count++;
+  }
+  return sum / count;
+}
+
+/* Very simple peak detection on the red signal */
+function estimateBpmFromBuffer(redArray, timeArray){
+  if (redArray.length < 30) return null;
+  // 1) detrend by subtracting moving average
+  const window = Math.max(3, Math.floor(redArray.length/8));
+  const smooth = [];
+  for (let i=0;i<redArray.length;i++){
+    let start = Math.max(0, i - window);
+    let end = Math.min(redArray.length - 1, i + window);
+    let s = 0;
+    for (let j=start;j<=end;j++) s += redArray[j];
+    smooth.push(s / (end - start + 1));
+  }
+  const detrended = redArray.map((v,i)=> v - smooth[i]);
+
+  // 2) simple bandpass-ish: lowpass with small smoothing
+  const b = [];
+  for (let i=0;i<detrended.length;i++){
+    const val = detrended[i] * 0.6 + (b[i-1]||0) * 0.4;
+    b.push(val);
+  }
+
+  // 3) find peaks: zero-crossing of derivative + threshold
+  const peaks = [];
+  for (let i=2;i<b.length-2;i++){
+    if (b[i] > b[i-1] && b[i] > b[i+1] && b[i] > 0.6 * Math.max(...b.slice(Math.max(0,i-10), i+1))) {
+      peaks.push(i);
+    }
+  }
+
+  if (peaks.length < 2) return null;
+  // compute intervals in seconds
+  const intervals = [];
+  for (let k=1;k<peaks.length;k++){
+    const t1 = timeArray[peaks[k-1]];
+    const t2 = timeArray[peaks[k]];
+    intervals.push((t2 - t1)/1000.0);
+  }
+  const avgInterval = intervals.reduce((a,b)=>a+b,0)/intervals.length;
+  const bpm = Math.round(60 / avgInterval);
+  if (bpm < 35 || bpm > 200) return null;
+  return bpm;
+}
+
+/* draw the waveform */
+function drawPpg(arr){
+  const ctx = ppgCtx;
+  const W = ppgCanvas.width = ppgCanvas.clientWidth * devicePixelRatio;
+  const H = ppgCanvas.height = 120 * devicePixelRatio;
+  ctx.clearRect(0,0,W,H);
+  ctx.lineWidth = 2 * devicePixelRatio;
+  ctx.beginPath();
+  for (let i=0;i<arr.length;i++){
+    const x = i / Math.max(1, arr.length-1) * (W-8) + 4;
+    const v = (arr[i] - Math.min(...arr)) / (Math.max(...arr) - Math.min(...arr) || 1);
+    const y = H - (v * (H-20) + 10);
+    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.strokeStyle = '#ffd166';
+  ctx.stroke();
+}
+
+/* main PPG loop */
+function ppgLoop(ts){
+  if (!ppgRunning) return;
+  const sample = sampleRedFromVideo();
+  if (sample !== null) {
+    redBuffer.push(sample);
+    timeBuffer.push(performance.now());
+    // keep buffer size reasonable (~8-12s at 30fps)
+    const maxSamples = 8 * 30;
+    if (redBuffer.length > maxSamples) {
+      redBuffer.shift(); timeBuffer.shift();
+    }
+    // update chart (every frame)
+    drawPpg(redBuffer);
+    // estimate bpm every ~2s if buffer large enough
+    if (timeBuffer.length > 60 && (timeBuffer.length % 10 === 0)) {
+      const bpm = estimateBpmFromBuffer(redBuffer, timeBuffer);
+      bpmEl.textContent = bpm ? bpm : '—';
+    }
+  }
+  ppgInterval = requestAnimationFrame(ppgLoop);
+}
+
+/* ============================
+   Microphone breathing / amplitude visualization
+   ============================ */
+const openMicBtn = document.getElementById('openMicBtn');
+const closeMicBtn = document.getElementById('closeMicBtn');
+const micCanvas = document.getElementById('micCanvas');
+let audioCtx = null;
+let micStream = null;
+let analyser = null;
+let micAnimation = null;
+
+openMicBtn.addEventListener('click', openMic);
+closeMicBtn.addEventListener('click', closeMic);
+
+async function openMic(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    micStatus.textContent = 'Microphone: not supported';
+    return;
+  }
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(micStream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 1024;
+    src.connect(analyser);
+    micStatus.textContent = 'Microphone: open';
+    micDrawLoop();
+  } catch (err) {
+    console.error(err);
+    micStatus.textContent = 'Microphone: permission denied or unavailable';
+  }
+}
+
+function closeMic(){
+  if (micAnimation) cancelAnimationFrame(micAnimation);
+  if (analyser) analyser.disconnect();
+  if (audioCtx) audioCtx.close();
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  micStatus.textContent = 'Microphone: stopped';
+  micStream = null; audioCtx = null; analyser = null;
+  // clear canvas
+  const ctx = micCanvas.getContext('2d');
+  ctx.clearRect(0,0,micCanvas.width,micCanvas.height);
+}
+
+function micDrawLoop(){
+  if (!analyser) return;
+  const bufferLength = analyser.fftSize;
+  const data = new Uint8Array(bufferLength);
+  analyser.getByteTimeDomainData(data);
+
+  // compute RMS amplitude
+  let sum = 0;
+  for (let i=0;i<data.length;i++){
+    const v = (data[i] - 128) / 128;
+    sum += v * v;
+  }
+  const rms = Math.sqrt(sum / data.length);
+
+  // draw waveform (simple)
+  const ctx = micCanvas.getContext('2d');
+  const W = micCanvas.width = micCanvas.clientWidth * devicePixelRatio;
+  const H = micCanvas.height = 100 * devicePixelRatio;
+  ctx.clearRect(0,0,W,H);
+  ctx.lineWidth = 2 * devicePixelRatio;
+  ctx.beginPath();
+  for (let i=0;i<bufferLength;i+=4){
+    const x = i / bufferLength * (W-6) + 3;
+    const y = H/2 + ((data[i] - 128)/128) * (H/2 - 6);
+    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.strokeStyle = '#06d6a0';
+  ctx.stroke();
+  // amplitude bar
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(0,H-10,W,8);
+  ctx.fillStyle = '#ffd166';
+  ctx.fillRect(0,H-10, Math.min(W, rms * 400 * devicePixelRatio), 8);
+
+  micAnimation = requestAnimationFrame(micDrawLoop);
+}
+
+/* ============================
+   Cleanup when leaving page
+   ============================ */
+window.addEventListener('beforeunload', () => {
+  stopStream();
+  closeMic();
+  stopPpg();
+});
+
+/* ============================
+   Accessibility & messaging
+   ============================ */
+openCameraBtn.setAttribute('aria-pressed','false');
+startPpgBtn.setAttribute('aria-pressed','false');
+
+</script>
+</body>
+</html>
